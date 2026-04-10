@@ -1,0 +1,14 @@
+{
+  "name": "page-agent-mqtt-bridge",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "MQTT Bridge for PageAgent — control browser via MQTT",
+  "scripts": {
+    "start": "node mqtt-bridge.js",
+    "dev": "node --watch mqtt-bridge.js"
+  },
+  "dependencies": {
+    "mqtt": "^5.3.0",
+    "ws": "^8.20.0"
+  }
+}
