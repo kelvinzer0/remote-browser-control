@@ -7,20 +7,32 @@ importScripts('mqtt.js');
 
 // ── Config ──────────────────────────────────
 const BROKER = 'wss://broker.hivemq.com:8884/mqtt';
-const EXT_ID = 'ext_' + Math.random().toString(36).substr(2, 8);
+let EXT_ID = null;
 
-const TOPICS = {
-  cmd:      `rbc/${EXT_ID}/cmd`,
-  result:   `rbc/${EXT_ID}/result`,
-  status:   `rbc/${EXT_ID}/status`,
-  broadcast: 'rbc/cmd',
-};
+// MV3 service worker can restart — reuse stored ID or generate new one
+async function initExtId() {
+  const data = await chrome.storage.local.get('extId');
+  if (data.extId) {
+    EXT_ID = data.extId;
+  } else {
+    EXT_ID = 'ext_' + Math.random().toString(36).substr(2, 8);
+    await chrome.storage.local.set({ extId: EXT_ID });
+  }
+  return EXT_ID;
+}
 
-let mqttClient = null;
-let connected = false;
+function getTopics() {
+  return {
+    cmd:      `rbc/${EXT_ID}/cmd`,
+    result:   `rbc/${EXT_ID}/result`,
+    status:   `rbc/${EXT_ID}/status`,
+    broadcast:'rbc/cmd',
+  };
+}
 
 // ── MQTT ────────────────────────────────────
 function connect() {
+  const TOPICS = getTopics();
   mqttClient = mqtt.connect(BROKER, {
     clientId: EXT_ID,
     clean: true,
@@ -473,15 +485,16 @@ function waitLoad(tabId, timeout = 15000) {
 }
 
 // ── Init ────────────────────────────────────
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.set({ extId: EXT_ID, connected: false });
+// ── Init ────────────────────────────────────
+async function init() {
+  await initExtId();
+  chrome.storage.local.set({ connected: false });
   connect();
-});
-chrome.runtime.onStartup.addListener(() => {
-  chrome.storage.local.set({ extId: EXT_ID });
-  connect();
-});
-connect();
+}
+
+chrome.runtime.onInstalled.addListener(init);
+chrome.runtime.onStartup.addListener(init);
+init();
 
 // Handle popup request for ID
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -492,7 +505,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 // Heartbeat every 30s
 setInterval(() => {
-  if (connected) {
+  if (connected && EXT_ID) {
+    const TOPICS = getTopics();
     publish(TOPICS.status, { status: 'online', extId: EXT_ID, ts: Date.now() });
   }
 }, 30000);
