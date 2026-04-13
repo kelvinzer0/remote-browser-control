@@ -3,7 +3,7 @@
 
 // MV3 service worker shim — mqtt.js expects `window`
 self.window = self;
-importScripts('mqtt.min.js');
+importScripts('mqtt.js');
 
 // ── Config ──────────────────────────────────
 const BROKER = 'wss://broker.hivemq.com:8884/mqtt';
