@@ -1,0 +1,14 @@
+{
+  "name": "remote-browser-control",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Remote browser control via MQTT",
+  "main": "mqtt-bridge.js",
+  "scripts": {
+    "start": "node mqtt-bridge.js"
+  },
+  "dependencies": {
+    "mqtt": "^5.12.1",
+    "ws": "^8.18.0"
+  }
+}
