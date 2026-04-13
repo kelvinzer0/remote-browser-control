@@ -11,7 +11,7 @@ const TOPICS = {
   cmd:      `rbc/${EXT_ID}/cmd`,
   result:   `rbc/${EXT_ID}/result`,
   status:   `rbc/${EXT_ID}/status`,
-  broadcast:'rbc/cmd`,
+  broadcast: 'rbc/cmd',
 };
 
 let mqttClient = null;
