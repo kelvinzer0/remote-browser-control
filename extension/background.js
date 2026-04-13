@@ -57,14 +57,18 @@ function connect() {
 
   mqttClient.on('message', async (topic, raw) => {
     try {
-      const msg = JSON.parse(raw.toString());
+      const text = raw instanceof Uint8Array ? new TextDecoder().decode(raw) : raw.toString();
+      console.log('[RBC] MSG topic:', topic, 'data:', text.slice(0, 200));
+      const msg = JSON.parse(text);
       if (msg.from === EXT_ID) return;
 
       const result = await exec(msg);
+      console.log('[RBC] EXEC result:', JSON.stringify(result).slice(0, 200));
       publish(TOPICS.result, { commandId: msg.commandId, ...result });
 
     } catch (e) {
-      publish(TOPICS.result, { commandId: msg?.commandId, ok: false, error: e.message });
+      console.error('[RBC] ERROR:', e.message);
+      try { publish(TOPICS.result, { commandId: msg?.commandId, ok: false, error: e.message }); } catch {}
     }
   });
 
