@@ -15,6 +15,10 @@
  *   node rbc.js getLinks linkedin.com         — get filtered links
  *   node rbc.js screenshot                    — take screenshot
  *   node rbc.js newTab "https://..."          — open new tab
+ *   node rbc.js clear-localstorage            — clear localStorage
+ *   node rbc.js clear-sessionstorage          — clear sessionStorage
+ *   node rbc.js cookiejar example.com         — get cookies (Netscape format)
+ *   node rbc.js cookiefile example.com        — save cookies to file
  *   node rbc.js jobs-search "Python"          — LinkedIn job search
  *   node rbc.js jobs-apply "https://..."      — LinkedIn Easy Apply
  */
@@ -288,6 +292,25 @@ function buildCommand(cmd, args) {
     case 'switchTab':
       return { action: 'switchTab', params: { tabId: parseInt(args[0]) } };
 
+    // ── Storage ─────────────────────────────
+    case 'clear-localstorage':
+    case 'clearLocalStorage':
+      return { action: 'clearLocalStorage' };
+
+    case 'clear-sessionstorage':
+    case 'clearSessionStorage':
+      return { action: 'clearSessionStorage' };
+
+    // ── Cookies ─────────────────────────────
+    case 'cookiejar':
+      return { action: 'cookiejar', params: args[0] ? { domain: args[0] } : {} };
+
+    case 'cookiefile':
+      return { action: 'cookiefile', params: {
+        ...(args[0] ? { domain: args[0] } : {}),
+        ...(args[1] ? { filename: args[1] } : {}),
+      } };
+
     // ── Eval (advanced) ─────────────────────
     case 'eval':
       return { action: 'eval', params: { code: args.join(' ') } };
@@ -379,6 +402,14 @@ Usage: node rbc.js <command> [args...]
     newTab <url>                 Open new tab
     closeTab [<id>]              Close tab
     switchTab <id>               Switch to tab
+
+  STORAGE
+    clear-localstorage           Clear localStorage
+    clear-sessionstorage         Clear sessionStorage
+
+  COOKIES
+    cookiejar [<domain>]         Get cookies (Netscape format)
+    cookiefile [<domain> [<file>]] Save cookies to file
 
   UTILS
     status                       Device status

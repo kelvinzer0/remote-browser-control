@@ -118,6 +118,20 @@ mosquitto_pub -h broker.hivemq.com -t "rbc/ext_abc/cmd" \
 | `getAttr "a.link" "href"` | get attribute |
 | `getValue "#email"` | get input value |
 
+### Storage
+| Command | Example |
+|---------|---------|
+| `clear-localstorage` | `clear-localstorage` |
+| `clear-sessionstorage` | `clear-sessionstorage` |
+
+### Cookies
+| Command | Example |
+|---------|---------|
+| `cookiejar` | `cookiejar` (get cookies, Netscape format) |
+| `cookiejar example.com` | `cookiejar example.com` (filter by domain) |
+| `cookiefile` | `cookiefile` (save cookies to file) |
+| `cookiefile example.com cookies.txt` | `cookiefile example.com cookies.txt` |
+
 ### Tabs
 | Command | Example |
 |---------|---------|
