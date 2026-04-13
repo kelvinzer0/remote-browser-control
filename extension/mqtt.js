@@ -102,6 +102,7 @@
     this.ws.binaryType = 'arraybuffer';
 
     this.ws.onopen = function() {
+      console.log('[mqtt] WS open, sending CONNECT');
       // CONNECT packet
       const proto = encStr('MQTT');
       const level = new Uint8Array([4]);      // MQTT 3.1.1
@@ -109,21 +110,26 @@
       const keep = new Uint8Array([0, 30]);   // 30s keepalive
       const cid = encStr(self.clientId);
       const pkt = buildPacket(CONNECT, proto, level, flags, keep, cid);
+      console.log('[mqtt] CONNECT pkt len=' + pkt.length);
       self.ws.send(pkt);
     };
 
     this.ws.onmessage = function(ev) {
-      const data = new Uint8Array(ev.data);
+      const raw = ev.data;
+      const data = raw instanceof ArrayBuffer ? new Uint8Array(raw) : new Uint8Array(raw.buffer || raw);
       if (data.length < 2) return;
       const type = data[0] >> 4;
       const rl = decLen(data, 1);
       const body = rl.pos;
+      console.log('[mqtt] RECV type=' + type + ' len=' + data.length + ' body=' + body);
 
       switch (type) {
         case CONNACK:
+          console.log('[mqtt] CONNACK, rc=' + data[body + 1] + ' flags=' + data[body]);
           if (data[body + 1] === 0) { // return code 0 = accepted
             self.connected = true;
             self._emit('connect');
+            console.log('[mqtt] Connected! Starting keepalive');
             // Start keepalive pings
             clearInterval(self._pingTimer);
             self._pingTimer = setInterval(function() {
