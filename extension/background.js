@@ -1,7 +1,7 @@
 // Background — MQTT Bridge Extension
 // Direct DOM commands, no LLM.
 
-// MV3 service worker — mqtt.js is a minimal custom client, no shim needed
+// MV3 service worker — import mqtt.js
 importScripts('mqtt.js');
 
 // ── Config ──────────────────────────────────
