@@ -25,7 +25,7 @@
 
 import mqtt from 'mqtt';
 
-const BROKER = process.env.MQTT_BROKER || 'wss://broker.hivemq.com:8884/mqtt';
+const BROKER = process.env.MQTT_BROKER || 'wss://broker.emqx.io:8084/mqtt';
 const DEVICE_ID = process.env.DEVICE_ID || null;
 const TIMEOUT = parseInt(process.env.TIMEOUT || '30000');
 

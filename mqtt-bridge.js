@@ -8,7 +8,7 @@
  *   node mqtt-bridge.js
  *
  * Env:
- *   MQTT_BROKER  (default: wss://broker.hivemq.com:8884/mqtt)
+ *   MQTT_BROKER  (default: wss://broker.emqx.io:8084/mqtt)
  *   DEVICE_ID    (auto-generated if not set)
  */
 
@@ -16,7 +16,7 @@ import mqtt from 'mqtt';
 import http from 'node:http';
 
 // ── Config ──────────────────────────────────
-const BROKER = process.env.MQTT_BROKER || 'wss://broker.hivemq.com:8884/mqtt';
+const BROKER = process.env.MQTT_BROKER || 'wss://broker.emqx.io:8084/mqtt';
 const DEVICE_ID = process.env.DEVICE_ID || `dev_${Math.random().toString(36).substr(2, 8)}`;
 const API_PORT = parseInt(process.env.API_PORT || '38402');
 

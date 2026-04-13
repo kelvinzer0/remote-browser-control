@@ -5,7 +5,7 @@
 importScripts('mqtt.js');
 
 // ── Config ──────────────────────────────────
-const BROKER = 'wss://broker.hivemq.com:8884/mqtt';
+const BROKER = 'wss://broker.emqx.io:8084/mqtt';
 let EXT_ID = null;
 
 // MV3 service worker can restart — reuse stored ID or generate new one
