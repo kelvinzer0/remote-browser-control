@@ -1,6 +1,8 @@
 // Background — MQTT Bridge Extension
 // Direct DOM commands, no LLM.
 
+// MV3 service worker shim — mqtt.js expects `window`
+self.window = self;
 importScripts('mqtt.min.js');
 
 // ── Config ──────────────────────────────────
