@@ -29,6 +29,9 @@ function getTopics() {
   };
 }
 
+let mqttClient = null;
+let connected = false;
+
 // ── MQTT ────────────────────────────────────
 function connect() {
   // Prevent duplicate connections
