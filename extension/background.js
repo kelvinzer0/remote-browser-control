@@ -1,8 +1,7 @@
 // Background — MQTT Bridge Extension
 // Direct DOM commands, no LLM.
 
-// MV3 service worker shim — mqtt.js expects `window`
-self.window = self;
+// MV3 service worker — mqtt.js is a minimal custom client, no shim needed
 importScripts('mqtt.js');
 
 // ── Config ──────────────────────────────────
@@ -32,6 +31,10 @@ function getTopics() {
 
 // ── MQTT ────────────────────────────────────
 function connect() {
+  // Prevent duplicate connections
+  if (mqttClient?.connected) return;
+  if (mqttClient) { try { mqttClient.end(); } catch {} }
+
   const TOPICS = getTopics();
   mqttClient = mqtt.connect(BROKER, {
     clientId: EXT_ID,
