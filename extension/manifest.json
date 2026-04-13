@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Browser Control",
-  "version": "1.0.0",
-  "description": "Remote browser control via MQTT — no LLM",
+  "version": "2.0.0",
+  "description": "Remote browser control via Cloudflare Workers — no MQTT, no LLM",
   "permissions": [
     "activeTab",
     "tabs",
@@ -12,8 +12,7 @@
     "cookies"
   ],
   "host_permissions": [
-    "<all_urls>",
-    "wss://*/*"
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js"

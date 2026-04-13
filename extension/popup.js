@@ -4,52 +4,58 @@ document.addEventListener('DOMContentLoaded', async () => {
   const extIdEl = document.getElementById('extId');
   const urlEl = document.getElementById('url');
   const copyBtn = document.getElementById('copyBtn');
-  const topicsEl = document.getElementById('topics');
+  const relayUrlInput = document.getElementById('relayUrl');
+  const saveBtn = document.getElementById('saveBtn');
+  const hintEl = document.getElementById('hint');
 
   let extId = null;
   let isConnected = false;
+  let relayUrl = '';
 
   try {
-    // Method 1: ask background directly
+    // Get from background
     try {
       const resp = await chrome.runtime.sendMessage({ type: 'getId' });
       if (resp?.extId) {
         extId = resp.extId;
         isConnected = resp.connected;
+        relayUrl = resp.relayUrl || '';
       }
     } catch {}
 
-    // Method 2: fallback to storage
+    // Fallback to storage
     if (!extId) {
-      const data = await chrome.storage.local.get(['extId', 'connected']);
+      const data = await chrome.storage.local.get(['extId', 'connected', 'relayUrl']);
       if (data.extId) {
         extId = data.extId;
         isConnected = data.connected;
+        relayUrl = data.relayUrl || '';
       }
     }
 
     if (extId) {
       extIdEl.textContent = extId;
-      topicsEl.textContent = 'rbc/' + extId + '/cmd';
     } else {
       extIdEl.textContent = 'Loading...';
-      // Retry once after a short delay (service worker might still be initializing)
       setTimeout(async () => {
-        const data = await chrome.storage.local.get(['extId', 'connected']);
+        const data = await chrome.storage.local.get(['extId', 'connected', 'relayUrl']);
         if (data.extId) {
           extIdEl.textContent = data.extId;
-          topicsEl.textContent = 'rbc/' + data.extId + '/cmd';
-          if (data.connected) {
-            dot.className = 'dot on';
-            statusText.textContent = 'Connected to MQTT';
-          }
+          isConnected = data.connected;
+          relayUrl = data.relayUrl || '';
+          relayUrlInput.value = relayUrl;
+          dot.className = isConnected ? 'dot on' : 'dot off';
+          statusText.textContent = isConnected ? 'Connected (CF Workers)' : 'Disconnected';
         }
       }, 1000);
     }
 
-    // Status dot
+    // Set relay URL input
+    relayUrlInput.value = relayUrl;
+
+    // Status
     dot.className = isConnected ? 'dot on' : 'dot off';
-    statusText.textContent = isConnected ? 'Connected to MQTT' : 'Disconnected';
+    statusText.textContent = isConnected ? 'Connected (CF Workers)' : 'Disconnected';
   } catch (e) {
     dot.className = 'dot off';
     statusText.textContent = 'Error: ' + e.message;
@@ -68,6 +74,22 @@ document.addEventListener('DOMContentLoaded', async () => {
       navigator.clipboard.writeText(text);
       copyBtn.textContent = '✅ Copied!';
       setTimeout(() => copyBtn.textContent = '📋 Copy Extension ID', 2000);
+    }
+  });
+
+  // Save relay URL
+  saveBtn.addEventListener('click', async () => {
+    const newUrl = relayUrlInput.value.trim();
+    if (!newUrl) {
+      hintEl.textContent = '⚠️ URL cannot be empty';
+      return;
+    }
+    try {
+      await chrome.runtime.sendMessage({ type: 'setRelayUrl', url: newUrl });
+      hintEl.textContent = '✅ Saved! Reconnecting...';
+      setTimeout(() => { hintEl.textContent = ''; }, 3000);
+    } catch (e) {
+      hintEl.textContent = '❌ ' + e.message;
     }
   });
 });

@@ -1,218 +1,143 @@
-# 🔗 Remote Browser Control
+# Remote Browser Control
 
-Control browser jarak jauh via **MQTT** — tanpa LLM, tanpa host, mandiri.
+🔗 Remote browser control via **Cloudflare Workers** — tanpa MQTT, tanpa host, mandiri.
 
 ## Arsitektur
 
 ```
-[Kamu/AI] → [MQTT Broker gratis] → [Bridge di laptop] → [Chrome Extension] → [Browser]
+[CLI / AI] → [Cloudflare Workers + Durable Object] ← [Chrome Extension]
+              ↑ WebSocket bidirectional                ↑ WebSocket
 ```
 
-**Zero dependency pada AI/LLM.** Semua command adalah direct DOM manipulation.
+- **Cloudflare Workers** — relay server (replace MQTT broker)
+- **Durable Objects** — stateful room per device, real-time WebSocket
+- **Chrome Extension** — connect langsung ke Workers via WebSocket
+- **CLI** — connect via WebSocket atau HTTP API
 
-## Setup (3 langkah)
+## Setup
 
-### 1. Install Extension
-
-Download & install extension ke Chrome:
-
-```
-1. Buka chrome://extensions
-2. Developer mode → ON
-3. Load unpacked → pilih folder extension/
-4. Klik icon extension → catat Extension ID dari popup
-```
-
-### 2. Jalankan Bridge
+### 1. Deploy Cloudflare Worker
 
 ```bash
-cd remote-browser
+cd cf-workers
 npm install
-node mqtt-bridge.js
+npx wrangler login
+npx wrangler deploy
 ```
 
 Output:
 ```
-╔═══════════════════════════════════════════════╗
-║  🔗 Remote Browser Control — MQTT Bridge      ║
-║  Device ID:  dev_abc123                        ║
-║  Broker:     wss://broker.hivemq.com:8884/mqtt ║
-║  API:        http://127.0.0.1:38402            ║
-╚═══════════════════════════════════════════════╝
+Published rbc-relay (x.x sec)
+  https://rbc-relay.yourname.workers.dev
 ```
 
-Copy **Device ID**, kirim ke saya.
+### 2. Install Chrome Extension
 
-### 3. Kontrol dari Mana Saja
+1. Buka `chrome://extensions`
+2. Developer mode → ON
+3. Load unpacked → pilih folder `extension/`
+4. Klik icon extension → set **Relay URL** ke URL Worker kamu
+5. Copy Extension ID dari popup
+
+### 3. Install CLI
 
 ```bash
-# Via CLI
-DEVICE_ID=dev_abc123 node rbc.js status
-DEVICE_ID=dev_abc123 node rbc.js navigate "https://linkedin.com/jobs"
-DEVICE_ID=dev_abc123 node rbc.js click "Easy Apply"
-DEVICE_ID=dev_abc123 node rbc.js type "#email" "me@mail.com"
-
-# Via API
-curl -X POST http://127.0.0.1:38402/execute \
-  -d '{"action":"navigate","params":{"url":"https://linkedin.com"}}'
-
-# Via MQTT dari mana saja
-mosquitto_pub -h broker.hivemq.com -t "rbc/ext_abc/cmd" \
-  -m '{"action":"click","params":{"text":"Sign In"},"commandId":"1"}'
+npm install
 ```
 
-## Commands (Direct, No LLM)
+### 4. Gunakan
 
-### Navigation
-| Command | Example |
-|---------|---------|
-| `navigate` | `navigate "https://linkedin.com"` |
-| `back` | `back` |
-| `forward` | `forward` |
-| `reload` | `reload` |
+```bash
+# Set environment
+export RELAY_URL=https://rbc-relay.yourname.workers.dev
+export DEVICE_ID=ext_abc123   # dari popup extension
 
-### Click
-| Command | Example |
-|---------|---------|
-| `click` | `click "Sign In"` (by text) |
-| `click-selector` | `click-selector "button.primary"` |
-| `click-id` | `click-id "loginBtn"` |
-| `click-index` | `click-index 3` (n-th link) |
+# Navigate
+node rbc-cf.js navigate "https://google.com"
 
-### Type / Fill
-| Command | Example |
-|---------|---------|
-| `type` | `type "#email" "me@mail.com"` |
-| `type-text` | `type-text "Email" "me@mail.com"` (by label) |
-| `type-placeholder` | `type-placeholder "Enter email" "me@mail.com"` |
-| `type-name` | `type-name "email" "me@mail.com"` |
-| `clear` | `clear "#email"` |
+# Click
+node rbc-cf.js click "Sign In"
 
-### Select / Checkbox
-| Command | Example |
-|---------|---------|
-| `select` | `select "country" "Indonesia"` |
-| `select-selector` | `select-selector "#dropdown" "option1"` |
-| `check` | `check "agree"` |
-| `check-label` | `check-label "I agree to terms"` |
-| `uncheck` | `uncheck "newsletter"` |
+# Type
+node rbc-cf.js type "#email" "me@mail.com"
 
-### Scroll
-| Command | Example |
-|---------|---------|
-| `scroll` | scroll down 500px |
-| `scroll 1000` | scroll 1000px |
-| `scroll top` | scroll to top |
-| `scroll bottom` | scroll to bottom |
-| `scroll into "Submit"` | scroll element to center |
+# Get text
+node rbc-cf.js text
 
-### Read
-| Command | Example |
-|---------|---------|
-| `text` | get all page text |
-| `text "h1"` | get text of h1 |
-| `html` | get page HTML |
-| `links` | get all links |
-| `links linkedin.com` | filter links |
-| `inputs` | get all form inputs |
-| `getAttr "a.link" "href"` | get attribute |
-| `getValue "#email"` | get input value |
+# Screenshot
+node rbc-cf.js screenshot
 
-### Storage
-| Command | Example |
-|---------|---------|
-| `clear-localstorage` | `clear-localstorage` |
-| `clear-sessionstorage` | `clear-sessionstorage` |
-
-### Cookies
-| Command | Example |
-|---------|---------|
-| `cookiejar` | `cookiejar` (get cookies, Netscape format) |
-| `cookiejar example.com` | `cookiejar example.com` (filter by domain) |
-| `cookiefile` | `cookiefile` (save cookies to file) |
-| `cookiefile example.com cookies.txt` | `cookiefile example.com cookies.txt` |
-
-### Tabs
-| Command | Example |
-|---------|---------|
-| `tabs` | list all tabs |
-| `newTab "https://..."` | open new tab |
-| `closeTab` | close current tab |
-| `switchTab 42` | switch to tab ID |
-
-### LinkedIn
-| Command | Example |
-|---------|---------|
-| `jobs-search "Python"` | open LinkedIn job search |
-| `jobs-apply "https://linkedin.com/jobs/view/123"` | go to job listing |
-
-### Utils
-| Command | Example |
-|---------|---------|
-| `status` | device status |
-| `ping` | ping |
-| `screenshot` | take screenshot |
-| `wait 2000` | wait 2 seconds |
-| `waitFor "button" 10000` | wait for element |
-| `eval "document.title"` | run JS |
-
-## MQTT Topics
-
-```
-rbc/{extId}/cmd        ← send commands here
-rbc/{extId}/result     ← results come here
-rbc/{extId}/status     ← heartbeat
-rbc/cmd                ← broadcast to all
+# Status
+node rbc-cf.js status
 ```
 
-## Free MQTT Brokers
+## HTTP API
 
-| Broker | WebSocket |
-|--------|-----------|
-| HiveMQ | `wss://broker.hivemq.com:8884/mqtt` |
-| EMQX | `wss://broker.emqx.io:8084/mqtt` |
-| Mosquitto | `wss://test.mosquitto.org:8081` |
+Worker juga expose HTTP API untuk integrasi mudah:
+
+```bash
+# Status
+curl https://rbc-relay.yourname.workers.dev/device/ext_abc123/api/status
+
+# Fire & forget command
+curl -X POST https://rbc-relay.yourname.workers.dev/device/ext_abc123/api/cmd \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"navigate","params":{"url":"https://google.com"}}'
+
+# Execute + wait for result
+curl -X POST https://rbc-relay.yourname.workers.dev/device/ext_abc123/api/execute \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"getText","params":{},"timeout":15000}'
+```
+
+## Perbedaan dari Versi MQTT
+
+| | MQTT (v1) | CF Workers (v2) |
+|---|---|---|
+| Broker | Public MQTT (HiveMQ/EMQX) | Cloudflare Workers + DO |
+| Koneksi | MQTT pub/sub | WebSocket |
+| Auth | None (public broker) | Device ID based |
+| Latency | Variable | Low (CF edge) |
+| Reliability | Public broker = shared | Dedicated per device |
+| Cost | Free (public) | Free tier (100K req/day) |
+
+## Commands
+
+Semua commands sama seperti versi MQTT:
+
+```
+Navigation:  navigate, back, forward, reload
+Click:       click, click-selector, click-id, click-index
+Type:        type, type-text, type-placeholder, type-name, clear
+Select:      select, select-selector, check, check-label, uncheck
+Scroll:      scroll, scroll top, scroll bottom, scroll into
+Read:        text, html, links, inputs, getAttr, getValue
+Tabs:        tabs, newTab, closeTab, switchTab
+Storage:     clear-localstorage, clear-sessionstorage
+Cookies:     cookiejar, cookiefile
+Utils:       status, ping, screenshot, wait, waitFor, eval
+LinkedIn:    jobs-search, jobs-apply
+```
 
 ## File Structure
 
 ```
-remote-browser/
-├── mqtt-bridge.js     ← Bridge: MQTT ↔ Extension WebSocket
-├── rbc.js             ← CLI controller
+remote-browser-control/
+├── cf-workers/              ← Cloudflare Worker
+│   ├── src/
+│   │   ├── index.js         ← Worker entry point
+│   │   └── device-room.js   ← Durable Object
+│   ├── wrangler.toml
+│   └── package.json
+├── extension/               ← Chrome Extension (v2)
+│   ├── manifest.json
+│   ├── background.js        ← WebSocket ke Workers
+│   ├── content.js
+│   ├── popup.html
+│   └── popup.js
+├── rbc-cf.js                ← CLI (CF Workers relay)
+├── mqtt-bridge.js           ← Legacy MQTT bridge
+├── rbc.js                   ← Legacy MQTT CLI
 ├── package.json
-├── extension/
-│   ├── manifest.json  ← Chrome extension manifest
-│   ├── background.js  ← MQTT + command executor
-│   ├── content.js     ← Page event relay
-│   ├── popup.html/js  ← Extension popup UI
-│   └── mqtt.min.js    ← MQTT.js library
 └── README.md
-```
-
-## LinkedIn Job Apply Flow
-
-```bash
-# 1. Search jobs
-node rbc.js jobs-search "Python Developer Jakarta"
-
-# 2. Browser opens LinkedIn jobs, wait for page
-node rbc.js waitFor ".jobs-search-results" 10000
-
-# 3. Get links
-node rbc.js links "linkedin.com/jobs/view"
-
-# 4. Navigate to job
-node rbc.js navigate "https://linkedin.com/jobs/view/123456"
-
-# 5. Click Easy Apply
-node rbc.js click "Easy Apply"
-
-# 6. Fill form
-node rbc.js type "#email" "me@mail.com"
-node rbc.js type-name "phone" "081234567890"
-node rbc.js select "country" "Indonesia"
-
-# 7. Scroll & submit
-node rbc.js scroll into "Submit"
-node rbc.js click "Submit application"
 ```

@@ -1,92 +1,122 @@
-// Background — MQTT Bridge Extension
-// Direct DOM commands, no LLM.
-
-// MV3 service worker — import mqtt.js
-importScripts('mqtt.js');
+/**
+ * Background — Cloudflare Workers Relay Extension
+ *
+ * Replaces MQTT with WebSocket to CF Workers Durable Object.
+ * Direct DOM commands, no LLM.
+ */
 
 // ── Config ──────────────────────────────────
-const BROKER = 'wss://broker.emqx.io:8084/mqtt';
-let EXT_ID = null;
+// Set your Cloudflare Worker URL here or via extension options
+const DEFAULT_RELAY_URL = 'https://rbc-relay.yourname.workers.dev';
 
-// MV3 service worker can restart — reuse stored ID or generate new one
+let RELAY_URL = DEFAULT_RELAY_URL;
+let EXT_ID = null;
+let ws = null;
+let connected = false;
+let reconnectTimer = null;
+let heartbeatTimer = null;
+
+// ── Extension ID (persist across service worker restarts) ──
 async function initExtId() {
-  const data = await chrome.storage.local.get('extId');
+  const data = await chrome.storage.local.get(['extId', 'relayUrl']);
   if (data.extId) {
     EXT_ID = data.extId;
   } else {
     EXT_ID = 'ext_' + Math.random().toString(36).substr(2, 8);
     await chrome.storage.local.set({ extId: EXT_ID });
   }
+  if (data.relayUrl) {
+    RELAY_URL = data.relayUrl;
+  }
   return EXT_ID;
 }
 
-function getTopics() {
-  return {
-    cmd:      `rbc/${EXT_ID}/cmd`,
-    result:   `rbc/${EXT_ID}/result`,
-    status:   `rbc/${EXT_ID}/status`,
-    broadcast:'rbc/cmd',
+// ── WebSocket Connection ────────────────────
+function connect() {
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+
+  const wsUrl = RELAY_URL.replace(/^http/, 'ws') + `/device/${EXT_ID}?role=ext`;
+  console.log('[RBC] Connecting:', wsUrl);
+
+  ws = new WebSocket(wsUrl);
+
+  ws.onopen = () => {
+    connected = true;
+    chrome.storage.local.set({ connected: true });
+    console.log('[RBC] Connected:', EXT_ID);
+
+    // Send initial status
+    sendStatus();
+
+    // Start heartbeat
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(sendHeartbeat, 30000);
+  };
+
+  ws.onmessage = async (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+      console.log('[RBC] CMD:', msg.action, JSON.stringify(msg.params || {}).slice(0, 100));
+
+      if (msg.type === 'command') {
+        const result = await exec(msg);
+        console.log('[RBC] Result:', JSON.stringify(result).slice(0, 200));
+        send({ type: 'result', commandId: msg.commandId, ...result });
+      }
+    } catch (e) {
+      console.error('[RBC] Error:', e.message);
+      try {
+        send({ type: 'result', commandId: msg?.commandId, ok: false, error: e.message });
+      } catch {}
+    }
+  };
+
+  ws.onclose = () => {
+    connected = false;
+    chrome.storage.local.set({ connected: false });
+    ws = null;
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    console.log('[RBC] Disconnected');
+
+    // Reconnect after 3s
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(connect, 3000);
+  };
+
+  ws.onerror = (err) => {
+    console.error('[RBC] WS Error:', err.message || 'connection error');
   };
 }
 
-let mqttClient = null;
-let connected = false;
-
-// ── MQTT ────────────────────────────────────
-function connect() {
-  // Prevent duplicate connections
-  if (mqttClient?.connected) return;
-  if (mqttClient) { try { mqttClient.end(); } catch {} }
-
-  const TOPICS = getTopics();
-  mqttClient = mqtt.connect(BROKER, {
-    clientId: EXT_ID,
-    clean: true,
-    connectTimeout: 10000,
-    reconnectPeriod: 5000,
-    keepalive: 30,
-  });
-
-  mqttClient.on('connect', () => {
-    connected = true;
-    chrome.storage.local.set({ connected: true });
-    mqttClient.subscribe([TOPICS.cmd, TOPICS.broadcast], { qos: 1 });
-    publish(TOPICS.status, { status: 'online', extId: EXT_ID, ts: Date.now() });
-    console.log('[RBC] Connected:', EXT_ID);
-  });
-
-  mqttClient.on('message', async (topic, raw) => {
-    try {
-      const text = raw instanceof Uint8Array ? new TextDecoder().decode(raw) : raw.toString();
-      console.log('[RBC] MSG topic:', topic, 'data:', text.slice(0, 200));
-      const msg = JSON.parse(text);
-      if (msg.from === EXT_ID) return;
-
-      const result = await exec(msg);
-      console.log('[RBC] EXEC result:', JSON.stringify(result).slice(0, 200));
-      publish(TOPICS.result, { commandId: msg.commandId, ...result });
-
-    } catch (e) {
-      console.error('[RBC] ERROR:', e.message);
-      try { publish(TOPICS.result, { commandId: msg?.commandId, ok: false, error: e.message }); } catch {}
-    }
-  });
-
-  mqttClient.on('close', () => {
-    connected = false;
-    chrome.storage.local.set({ connected: false });
-  });
-  mqttClient.on('error', () => {});
-}
-
-function publish(topic, data) {
-  if (mqttClient?.connected) {
-    data.from = EXT_ID;
-    mqttClient.publish(topic, JSON.stringify(data), { qos: 1 });
+function send(data) {
+  if (ws?.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(data));
   }
 }
 
-// ── Command Executor (no LLM) ──────────────
+async function sendStatus() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tabs = await chrome.tabs.query({});
+    send({
+      type: 'status',
+      status: 'online',
+      extId: EXT_ID,
+      url: tab?.url || '',
+      title: tab?.title || '',
+      tabs: tabs.length,
+      ts: Date.now(),
+    });
+  } catch {
+    send({ type: 'status', status: 'online', extId: EXT_ID, ts: Date.now() });
+  }
+}
+
+function sendHeartbeat() {
+  send({ type: 'heartbeat', extId: EXT_ID, ts: Date.now() });
+}
+
+// ── Command Executor (same logic as original) ──
 async function exec(msg) {
   const { action, params = {} } = msg;
 
@@ -136,7 +166,6 @@ async function exec(msg) {
         else if (p.id) el = document.getElementById(p.id);
         else if (p.name) el = document.querySelector(`[name="${p.name}"]`);
         else if (p.text) {
-          // Find by visible text
           const all = document.querySelectorAll('a, button, [role="button"], input[type="submit"], span, div, li');
           for (const e of all) {
             const t = e.textContent?.trim();
@@ -165,7 +194,6 @@ async function exec(msg) {
         else if (p.placeholder) el = document.querySelector(`[placeholder*="${p.placeholder}"]`);
         else if (p.ariaLabel) el = document.querySelector(`[aria-label*="${p.ariaLabel}"]`);
         else if (p.label) {
-          // Find label and its input
           const labels = document.querySelectorAll('label');
           for (const l of labels) {
             if (l.textContent.trim().includes(p.label)) {
@@ -179,11 +207,9 @@ async function exec(msg) {
         if (!el) return { ok: false, error: 'input not found' };
         el.focus();
         el.value = p.value;
-
         el.dispatchEvent(new Event('input', { bubbles: true }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
         el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
-
         return { ok: true, data: { name: el.name || el.id, value: p.value } };
       }, params);
 
@@ -203,10 +229,7 @@ async function exec(msg) {
         if (p.selector) el = document.querySelector(p.selector);
         else if (p.name) el = document.querySelector(`select[name="${p.name}"]`);
         else if (p.id) el = document.getElementById(p.id);
-
         if (!el) return { ok: false, error: 'select not found' };
-
-        // Match by value or text
         for (const opt of el.options) {
           if (opt.value === p.value || opt.text.includes(p.value)) {
             el.value = opt.value;
@@ -239,18 +262,6 @@ async function exec(msg) {
         return { ok: true, data: { name: el.name, checked: el.checked } };
       }, params);
 
-    // ── File Upload ─────────────────────────
-    case 'upload':
-      // Note: Chrome extensions can't directly set file input values
-      // Use fetch to get file and inject via executeScript
-      return await run(tab.id, async (p) => {
-        const input = document.querySelector(p.selector || 'input[type="file"]');
-        if (!input) return { ok: false, error: 'file input not found' };
-        // Can't programmatically set files in content scripts
-        // User must trigger upload manually or use data transfer
-        return { ok: false, error: 'use manual upload or data-transfer method' };
-      }, params);
-
     // ── Scroll ──────────────────────────────
     case 'scroll':
       return await run(tab.id, (p) => {
@@ -270,17 +281,13 @@ async function exec(msg) {
           }
         }
         else window.scrollBy({ top: p.y || 500, behavior: 'smooth' });
-
         return { ok: true };
       }, params);
 
     // ── Read / Extract ──────────────────────
     case 'getText':
       return await run(tab.id, (p) => {
-        if (p.selector) {
-          const el = document.querySelector(p.selector);
-          return { ok: true, data: el?.textContent?.trim() || '' };
-        }
+        if (p.selector) return { ok: true, data: document.querySelector(p.selector)?.textContent?.trim() || '' };
         return { ok: true, data: document.body.innerText.slice(0, 5000) };
       }, params);
 
@@ -295,26 +302,14 @@ async function exec(msg) {
         const filter = p.filter || '';
         const links = Array.from(document.querySelectorAll('a[href]'))
           .filter(a => !filter || a.href.includes(filter))
-          .map(a => ({
-            text: a.textContent?.trim().slice(0, 100),
-            href: a.href,
-          }));
+          .map(a => ({ text: a.textContent?.trim().slice(0, 100), href: a.href }));
         return { ok: true, data: links.slice(0, 50) };
       }, params);
 
     case 'getInputs':
       return await run(tab.id, () => {
         const inputs = Array.from(document.querySelectorAll('input, textarea, select'))
-          .map(el => ({
-            tag: el.tagName,
-            type: el.type,
-            name: el.name,
-            id: el.id,
-            placeholder: el.placeholder,
-            label: el.labels?.[0]?.textContent?.trim(),
-            value: el.value?.slice(0, 100),
-            required: el.required,
-          }));
+          .map(el => ({ tag: el.tagName, type: el.type, name: el.name, id: el.id, placeholder: el.placeholder, label: el.labels?.[0]?.textContent?.trim(), value: el.value?.slice(0, 100), required: el.required }));
         return { ok: true, data: inputs };
       });
 
@@ -338,26 +333,21 @@ async function exec(msg) {
       return { ok: true };
 
     case 'waitFor':
-      // Wait for element to appear
       return await run(tab.id, (p) => {
         return new Promise((resolve) => {
           const timeout = p.timeout || 10000;
           const start = Date.now();
           const check = () => {
             const el = document.querySelector(p.selector);
-            if (el) {
-              resolve({ ok: true, data: { found: true } });
-            } else if (Date.now() - start > timeout) {
-              resolve({ ok: false, error: 'timeout waiting for element' });
-            } else {
-              setTimeout(check, 200);
-            }
+            if (el) resolve({ ok: true, data: { found: true } });
+            else if (Date.now() - start > timeout) resolve({ ok: false, error: 'timeout waiting for element' });
+            else setTimeout(check, 200);
           };
           check();
         });
       }, params);
 
-    // ── Execute ─────────────────────────────
+    // ── Eval ────────────────────────────────
     case 'eval':
       return await run(tab.id, (p) => {
         const result = eval(p.code);
@@ -372,9 +362,7 @@ async function exec(msg) {
     // ── Tabs ────────────────────────────────
     case 'getTabs':
       const allTabs = await chrome.tabs.query({});
-      return { ok: true, data: allTabs.map(t => ({
-        id: t.id, url: t.url, title: t.title, active: t.active,
-      })) };
+      return { ok: true, data: allTabs.map(t => ({ id: t.id, url: t.url, title: t.title, active: t.active })) };
 
     case 'newTab':
       const nt = await chrome.tabs.create({ url: params.url || 'about:blank', active: true });
@@ -409,38 +397,19 @@ async function exec(msg) {
     case 'cookiefile': {
       const url = params.url || tab.url;
       let domain = params.domain || null;
-      try {
-        if (!domain) domain = new URL(url).hostname;
-      } catch {}
+      try { if (!domain) domain = new URL(url).hostname; } catch {}
       const cookies = await chrome.cookies.getAll({ domain: domain || undefined, url: domain ? undefined : url });
-      // Netscape cookie jar format
-      const jar = [
-        '# Netscape HTTP Cookie File',
-        `# Generated by RBC — ${new Date().toISOString()}`,
-        `# Domain\tIncludeSubdomains\tPath\tSecure\tExpiry\tName\tValue`,
-      ];
+      const jar = ['# Netscape HTTP Cookie File', `# Generated by RBC — ${new Date().toISOString()}`, '# Domain\tIncludeSubdomains\tPath\tSecure\tExpiry\tName\tValue'];
       for (const c of cookies) {
-        const line = [
-          c.domain,
-          c.domain.startsWith('.') ? 'TRUE' : 'FALSE',
-          c.path,
-          c.secure ? 'TRUE' : 'FALSE',
-          c.expirationDate ? Math.floor(c.expirationDate) : '0',
-          c.name,
-          c.value,
-        ].join('\t');
-        jar.push(line);
+        jar.push([c.domain, c.domain.startsWith('.') ? 'TRUE' : 'FALSE', c.path, c.secure ? 'TRUE' : 'FALSE', c.expirationDate ? Math.floor(c.expirationDate) : '0', c.name, c.value].join('\t'));
       }
       const jarText = jar.join('\n');
-
       if (action === 'cookiefile') {
-        // Download as file via chrome.downloads
         const blob = `data:text/plain;charset=utf-8,${encodeURIComponent(jarText)}`;
         const filename = params.filename || `cookies_${domain || 'all'}.txt`;
         const dlId = await chrome.downloads.download({ url: blob, filename, saveAs: false });
         return { ok: true, data: { file: filename, cookies: cookies.length, downloadId: dlId } };
       }
-
       return { ok: true, data: { cookies: cookies.length, jar: jarText } };
     }
 
@@ -450,13 +419,7 @@ async function exec(msg) {
 
     case 'status':
       const tabs = await chrome.tabs.query({});
-      return { ok: true, data: {
-        extId: EXT_ID,
-        connected,
-        tabs: tabs.length,
-        url: tab.url,
-        title: tab.title,
-      }};
+      return { ok: true, data: { extId: EXT_ID, connected, tabs: tabs.length, url: tab.url, title: tab.title } };
 
     default:
       return { ok: false, error: `unknown action: ${action}` };
@@ -465,7 +428,7 @@ async function exec(msg) {
 
 // ── Helpers ─────────────────────────────────
 function run(tabId, fn, params) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     chrome.scripting.executeScript({
       target: { tabId },
       func: fn,
@@ -495,7 +458,6 @@ function waitLoad(tabId, timeout = 15000) {
 }
 
 // ── Init ────────────────────────────────────
-// ── Init ────────────────────────────────────
 async function init() {
   await initExtId();
   chrome.storage.local.set({ connected: false });
@@ -506,17 +468,16 @@ chrome.runtime.onInstalled.addListener(init);
 chrome.runtime.onStartup.addListener(init);
 init();
 
-// Handle popup request for ID
+// Handle popup request
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'getId') {
-    sendResponse({ extId: EXT_ID, connected });
+    sendResponse({ extId: EXT_ID, connected, relayUrl: RELAY_URL });
+  }
+  if (msg.type === 'setRelayUrl') {
+    RELAY_URL = msg.url;
+    chrome.storage.local.set({ relayUrl: msg.url });
+    if (ws) ws.close(); // will auto-reconnect with new URL
+    connect();
+    sendResponse({ ok: true });
   }
 });
-
-// Heartbeat every 30s
-setInterval(() => {
-  if (connected && EXT_ID) {
-    const TOPICS = getTopics();
-    publish(TOPICS.status, { status: 'online', extId: EXT_ID, ts: Date.now() });
-  }
-}, 30000);

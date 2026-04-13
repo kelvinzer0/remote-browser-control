@@ -1,0 +1,17 @@
+name = "rbc-relay"
+main = "src/index.js"
+compatibility_date = "2024-12-01"
+
+# Durable Objects
+[[durable_objects.bindings]]
+name = "DEVICE_ROOM"
+class_name = "DeviceRoom"
+
+# Durable Object migrations
+[[migrations]]
+tag = "v1"
+new_classes = ["DeviceRoom"]
+
+# Optional: limit to specific regions for lower latency
+# [placement]
+# mode = "smart"
