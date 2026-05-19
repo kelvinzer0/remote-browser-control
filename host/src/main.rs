@@ -15,6 +15,12 @@ const MCP_PORT: u16 = 3000;
 type PendingMap = Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>;
 
 fn main() -> anyhow::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.contains(&"--stdio".to_string()) {
+        return run_stdio_proxy();
+    }
+
     eprintln!("[rbc-host] starting v3.0.0 — NM host + MCP server");
 
     let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
@@ -56,6 +62,48 @@ fn main() -> anyhow::Result<()> {
 
     let _ = nm_handle.join();
     let _ = mcp_handle.join();
+
+    Ok(())
+}
+
+/// stdio MCP proxy mode — for OpenClaude / Claude Code
+/// Reads JSON-RPC from stdin, forwards to TCP MCP server on port 3000
+fn run_stdio_proxy() -> anyhow::Result<()> {
+    eprintln!("[rbc-host] stdio proxy mode → tcp://127.0.0.1:{}", MCP_PORT);
+
+    let stream = TcpStream::connect(format!("127.0.0.1:{}", MCP_PORT))?;
+    let server_read = stream.try_clone()?;
+    let mut server_write = stream;
+
+    // Thread: read responses from TCP server, write to stdout
+    std::thread::spawn(move || {
+        let reader = std::io::BufReader::new(server_read);
+        let stdout = std::io::stdout();
+        let mut stdout = stdout.lock();
+        for line in reader.lines() {
+            match line {
+                Ok(l) if !l.trim().is_empty() => {
+                    if writeln!(stdout, "{}", l).is_err() { break; }
+                    let _ = stdout.flush();
+                }
+                Ok(_) => continue,
+                Err(_) => break,
+            }
+        }
+    });
+
+    // Main thread: read JSON-RPC from stdin, forward to TCP server
+    let stdin = std::io::stdin();
+    for line in stdin.lock().lines() {
+        match line {
+            Ok(l) if !l.trim().is_empty() => {
+                if writeln!(server_write, "{}", l).is_err() { break; }
+                let _ = server_write.flush();
+            }
+            Ok(_) => continue,
+            Err(_) => break,
+        }
+    }
 
     Ok(())
 }

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "rbc": {
+      "command": "C:\\Users\\kelvin\\AppData\\Local\\rbc\\rbc-host.exe",
+      "args": ["--stdio"]
+    }
+  }
+}
