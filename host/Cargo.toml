@@ -1,0 +1,15 @@
+[package]
+name = "rbc-host"
+version = "3.0.0"
+edition = "2021"
+description = "Remote Browser Control — MCP server via Chrome Native Messaging"
+
+[[bin]]
+name = "rbc-host"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"

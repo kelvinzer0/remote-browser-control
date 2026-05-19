@@ -1,15 +1,17 @@
 {
   "manifest_version": 3,
   "name": "Browser Control",
-  "version": "2.0.0",
-  "description": "Remote browser control via Cloudflare Workers — no MQTT, no LLM",
+  "version": "3.0.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1KCFa+VNnzVY+XMxV+8jArTA0NDs0L8lKzixlzj92opvqF+lqT/+cyFXu10GccTfExV9bZYGo2ocEc5CViQTv1b6dIOsXm6hn+aszaAS0nXecQiyx36V8sfw6KpD09RFXJP2ufywNaG11OCpx/Vta8ZAIs+25XrXviPZjhBvqo3i5esJC01FdtxSr96dV9RpSBWsVSHMu4YuaWCWTZdH4KnXSNTMO0i+76bfsoNAqS+zAlPuf5IgrVIORKwFtq2B/A9GkJiA7/6ezPPR7GnkcyoLSXqlMK7R8/zsSzGpSGNVzwPg0DSuMSvgZP91J3dQ7zBDgiRsfyy7tItP04DhGwIDAQAB",
+  "description": "Remote browser control via MCP server — Rust native host",
   "permissions": [
     "activeTab",
     "tabs",
     "scripting",
     "storage",
     "downloads",
-    "cookies"
+    "cookies",
+    "nativeMessaging"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -17,13 +19,6 @@
   "background": {
     "service_worker": "background.js"
   },
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
-      "run_at": "document_idle"
-    }
-  ],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {

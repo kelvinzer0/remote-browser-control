@@ -1,96 +1,65 @@
 /**
- * Background — Cloudflare Workers Relay Extension
+ * Background — Chrome Native Messaging Extension
  *
- * Replaces MQTT with WebSocket to CF Workers Durable Object.
- * Direct DOM commands, no LLM.
+ * Communicates with rbc-host binary via Chrome Native Messaging protocol.
+ * Chrome spawns the binary when connectNative() is called.
  */
 
-// ── Config ──────────────────────────────────
-// Set your Cloudflare Worker URL here or via extension options
-const DEFAULT_RELAY_URL = 'https://rbc-relay.yourname.workers.dev';
+const NATIVE_HOST = 'com.kelvin.rbc';
 
-let RELAY_URL = DEFAULT_RELAY_URL;
-let EXT_ID = null;
-let ws = null;
+let port = null;
 let connected = false;
-let reconnectTimer = null;
-let heartbeatTimer = null;
 
-// ── Extension ID (persist across service worker restarts) ──
-async function initExtId() {
-  const data = await chrome.storage.local.get(['extId', 'relayUrl']);
-  if (data.extId) {
-    EXT_ID = data.extId;
-  } else {
-    EXT_ID = 'ext_' + Math.random().toString(36).substr(2, 8);
-    await chrome.storage.local.set({ extId: EXT_ID });
-  }
-  if (data.relayUrl) {
-    RELAY_URL = data.relayUrl;
-  }
-  return EXT_ID;
-}
-
-// ── WebSocket Connection ────────────────────
+// ── Native Messaging Connection ────────────
 function connect() {
-  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+  if (port) return;
 
-  const wsUrl = RELAY_URL.replace(/^http/, 'ws') + `/device/${EXT_ID}?role=ext`;
-  console.log('[RBC] Connecting:', wsUrl);
+  console.log('[RBC] Connecting to native host:', NATIVE_HOST);
 
-  ws = new WebSocket(wsUrl);
+  try {
+    port = chrome.runtime.connectNative(NATIVE_HOST);
 
-  ws.onopen = () => {
-    connected = true;
-    chrome.storage.local.set({ connected: true });
-    console.log('[RBC] Connected:', EXT_ID);
-
-    // Send initial status
-    sendStatus();
-
-    // Start heartbeat
-    if (heartbeatTimer) clearInterval(heartbeatTimer);
-    heartbeatTimer = setInterval(sendHeartbeat, 30000);
-  };
-
-  ws.onmessage = async (event) => {
-    try {
-      const msg = JSON.parse(event.data);
-      console.log('[RBC] CMD:', msg.action, JSON.stringify(msg.params || {}).slice(0, 100));
-
-      if (msg.type === 'command') {
-        const result = await exec(msg);
-        console.log('[RBC] Result:', JSON.stringify(result).slice(0, 200));
-        send({ type: 'result', commandId: msg.commandId, ...result });
-      }
-    } catch (e) {
-      console.error('[RBC] Error:', e.message);
+    port.onMessage.addListener(async (msg) => {
       try {
+        console.log('[RBC] CMD:', msg.action, JSON.stringify(msg.params || {}).slice(0, 100));
+
+        if (msg.type === 'command') {
+          const result = await exec(msg);
+          console.log('[RBC] Result:', JSON.stringify(result).slice(0, 200));
+          send({ type: 'result', commandId: msg.commandId, ...result });
+        }
+      } catch (e) {
+        console.error('[RBC] Error:', e.message);
         send({ type: 'result', commandId: msg?.commandId, ok: false, error: e.message });
-      } catch {}
-    }
-  };
+      }
+    });
 
-  ws.onclose = () => {
-    connected = false;
-    chrome.storage.local.set({ connected: false });
-    ws = null;
-    if (heartbeatTimer) clearInterval(heartbeatTimer);
-    console.log('[RBC] Disconnected');
+    port.onDisconnect.addListener(() => {
+      connected = false;
+      port = null;
+      console.log('[RBC] Disconnected from native host:', chrome.runtime.lastError?.message || 'unknown');
 
-    // Reconnect after 3s
-    if (reconnectTimer) clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(connect, 3000);
-  };
+      // Reconnect after delay (Chrome may restart the binary)
+      setTimeout(connect, 3000);
+    });
 
-  ws.onerror = (err) => {
-    console.error('[RBC] WS Error:', err.message || 'connection error');
-  };
+    connected = true;
+    console.log('[RBC] Connected to native host');
+    sendStatus();
+  } catch (e) {
+    console.error('[RBC] Failed to connect:', e.message);
+    port = null;
+    setTimeout(connect, 3000);
+  }
 }
 
 function send(data) {
-  if (ws?.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(data));
+  if (port) {
+    try {
+      port.postMessage(data);
+    } catch (e) {
+      console.error('[RBC] Send error:', e.message);
+    }
   }
 }
 
@@ -101,26 +70,20 @@ async function sendStatus() {
     send({
       type: 'status',
       status: 'online',
-      extId: EXT_ID,
       url: tab?.url || '',
       title: tab?.title || '',
       tabs: tabs.length,
       ts: Date.now(),
     });
   } catch {
-    send({ type: 'status', status: 'online', extId: EXT_ID, ts: Date.now() });
+    send({ type: 'status', status: 'online', ts: Date.now() });
   }
 }
 
-function sendHeartbeat() {
-  send({ type: 'heartbeat', extId: EXT_ID, ts: Date.now() });
-}
-
-// ── Command Executor (same logic as original) ──
+// ── Command Executor ────────────────────────
 async function exec(msg) {
   const { action, params = {} } = msg;
 
-  // Get active tab
   let tab;
   if (params.tabId) {
     tab = await chrome.tabs.get(params.tabId);
@@ -419,7 +382,7 @@ async function exec(msg) {
 
     case 'status':
       const tabs = await chrome.tabs.query({});
-      return { ok: true, data: { extId: EXT_ID, connected, tabs: tabs.length, url: tab.url, title: tab.title } };
+      return { ok: true, data: { connected, tabs: tabs.length, url: tab.url, title: tab.title } };
 
     default:
       return { ok: false, error: `unknown action: ${action}` };
@@ -458,26 +421,13 @@ function waitLoad(tabId, timeout = 15000) {
 }
 
 // ── Init ────────────────────────────────────
-async function init() {
-  await initExtId();
-  chrome.storage.local.set({ connected: false });
-  connect();
-}
-
-chrome.runtime.onInstalled.addListener(init);
-chrome.runtime.onStartup.addListener(init);
-init();
+chrome.runtime.onInstalled.addListener(() => connect());
+chrome.runtime.onStartup.addListener(() => connect());
+connect();
 
 // Handle popup request
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'getId') {
-    sendResponse({ extId: EXT_ID, connected, relayUrl: RELAY_URL });
-  }
-  if (msg.type === 'setRelayUrl') {
-    RELAY_URL = msg.url;
-    chrome.storage.local.set({ relayUrl: msg.url });
-    if (ws) ws.close(); // will auto-reconnect with new URL
-    connect();
-    sendResponse({ ok: true });
+    sendResponse({ connected });
   }
 });

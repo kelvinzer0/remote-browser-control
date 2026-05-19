@@ -1,0 +1,7 @@
+{
+  "name": "com.kelvin.rbc",
+  "description": "Remote Browser Control MCP Host",
+  "path": "C:\\Users\\kelvin\\AppData\\Local\\rbc\\rbc-host.exe",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://elbhjlckdneolfcekfflfgfppeelbmdk/"]
+}
